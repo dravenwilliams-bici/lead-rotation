@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Lead Rotation Tracker</title>
+  <title>Phone Lead Indicator</title>
   <style>
     body {
       font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -23,7 +23,12 @@
     }
     h1 {
       font-size: 1.4rem;
-      margin-bottom: 8px;
+      margin-bottom: 4px;
+    }
+    .subtitle {
+      font-size: 0.9rem;
+      opacity: 0.8;
+      margin-bottom: 12px;
     }
     .name {
       font-size: 2rem;
@@ -62,7 +67,8 @@
 </head>
 <body>
   <div class="card">
-    <h1>Next Lead Goes To</h1>
+    <h1>Phone Lead Indicator</h1>
+    <div class="subtitle">Next phone lead goes to:</div>
     <div class="name" id="currentName"></div>
     <div class="label" id="lastUpdated"></div>
     <button id="toggleButton">Assign Lead & Switch</button>
@@ -71,8 +77,8 @@
   </div>
 
   <script>
-    // Edit these two names to match you and your colleague
-    const people = ["Emma", "Colleague"];
+    // Rotation order: Sean first, then Draven
+    const people = ["Sean", "Draven"];
     const STORAGE_KEY = "leadRotationState_v1";
 
     function loadState() {
@@ -84,6 +90,7 @@
           // ignore and reset
         }
       }
+      // Default: Sean gets the first lead
       return {
         nextIndex: 0,
         history: []
@@ -134,16 +141,16 @@
       const now = new Date();
       const assignedTo = people[state.nextIndex];
 
-      // add to top of history
+      // Record who just got this lead
       state.history.unshift({
         assignedTo,
         time: formatTime(now)
       });
 
-      // keep only last 20 entries
+      // Keep only last 20 entries
       state.history = state.history.slice(0, 20);
 
-      // switch to the other person
+      // Switch to the other person for the next lead
       state.nextIndex = (state.nextIndex + 1) % people.length;
 
       saveState(state);
