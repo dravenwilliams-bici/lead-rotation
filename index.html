@@ -18,7 +18,7 @@
       border-radius: 16px;
       padding: 24px 32px;
       box-shadow: 0 8px 20px rgba(0,0,0,0.08);
-      max-width: 360px;
+      max-width: 380px;
       text-align: center;
     }
     h1 {
@@ -36,10 +36,11 @@
       margin: 16px 0 8px;
     }
     .label {
-      font-size: 0.9rem;
+      font-size: 0.85rem;
       text-transform: uppercase;
       letter-spacing: 0.08em;
       opacity: 0.7;
+      margin-bottom: 4px;
     }
     button {
       margin-top: 16px;
@@ -63,43 +64,63 @@
       margin-bottom: 4px;
       opacity: 0.8;
     }
+    .status {
+      margin-top: 8px;
+      font-size: 0.8rem;
+      opacity: 0.7;
+    }
   </style>
 </head>
 <body>
   <div class="card">
     <h1>Phone Lead Indicator</h1>
     <div class="subtitle">Next phone lead goes to:</div>
-    <div class="name" id="currentName"></div>
-    <div class="label" id="lastUpdated"></div>
-    <button id="toggleButton">Assign Lead & Switch</button>
+    <div class="name" id="currentName">Loading...</div>
+    <div class="label" id="lastUpdated">Connecting…</div>
+    <button id="toggleButton" disabled>Assign Lead & Switch</button>
+    <div class="status" id="statusText"></div>
 
     <div class="history" id="history"></div>
   </div>
 
-  <script>
-    // Rotation order: Sean first, then Draven
+  <!-- Firebase + app logic -->
+  <script type="module">
+    // Import Firebase SDKs from the CDN
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+    import {
+      getFirestore,
+      doc,
+      getDoc,
+      onSnapshot,
+      runTransaction,
+      setDoc
+    } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+
+    // Your web app's Firebase configuration
+    const firebaseConfig = {
+      apiKey: "AIzaSyAwZcpkH33b828fduDfrUNIKk0pXeZOskA",
+      authDomain: "bici-lead-indicator.firebaseapp.com",
+      projectId: "bici-lead-indicator",
+      storageBucket: "bici-lead-indicator.firebasestorage.app",
+      messagingSenderId: "226296375616",
+      appId: "1:226296375616:web:eda7276e4e095b908df2a5"
+    };
+    // Initialize Firebase
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+
+    // Rotation between Sean and Draven (Sean starts)
     const people = ["Sean", "Draven"];
-    const STORAGE_KEY = "leadRotationState_v1";
+    const stateDocRef = doc(db, "leadState", "phoneLead");
 
-    function loadState() {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved) {
-        try {
-          return JSON.parse(saved);
-        } catch (e) {
-          // ignore and reset
-        }
-      }
-      // Default: Sean gets the first lead
-      return {
-        nextIndex: 0,
-        history: []
-      };
-    }
+    const currentNameEl = document.getElementById("currentName");
+    const lastUpdatedEl = document.getElementById("lastUpdated");
+    const historyEl = document.getElementById("history");
+    const toggleButton = document.getElementById("toggleButton");
+    const statusText = document.getElementById("statusText");
 
-    function saveState(state) {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-    }
+    const MAX_HISTORY_STORED = 100;  // how many entries we keep in Firestore
+    const MAX_HISTORY_DISPLAYED = 15; // how many we show on the page
 
     function formatTime(date) {
       return date.toLocaleString([], {
@@ -112,21 +133,20 @@
     }
 
     function render(state) {
-      const currentNameEl = document.getElementById("currentName");
-      const lastUpdatedEl = document.getElementById("lastUpdated");
-      const historyEl = document.getElementById("history");
-
       currentNameEl.textContent = people[state.nextIndex];
 
-      if (state.history.length > 0) {
-        const last = state.history[0];
+      const history = state.history || [];
+
+      if (history.length > 0) {
+        const last = history[0];
         lastUpdatedEl.textContent = `Last lead: ${last.assignedTo} at ${last.time}`;
       } else {
         lastUpdatedEl.textContent = "No leads assigned yet.";
       }
 
       historyEl.innerHTML = "";
-      state.history.forEach(entry => {
+      // 🔹 Only show the most recent 15 entries
+      history.slice(0, MAX_HISTORY_DISPLAYED).forEach(entry => {
         const div = document.createElement("div");
         div.className = "history-entry";
         div.textContent = `• ${entry.time} → ${entry.assignedTo}`;
@@ -134,27 +154,80 @@
       });
     }
 
-    const state = loadState();
-    render(state);
+    async function ensureInitialState() {
+      const snap = await getDoc(stateDocRef);
+      if (!snap.exists()) {
+        // Default: Sean gets first lead, empty history
+        await setDoc(stateDocRef, {
+          nextIndex: 0,
+          history: []
+        });
+      }
+    }
 
-    document.getElementById("toggleButton").addEventListener("click", () => {
-      const now = new Date();
-      const assignedTo = people[state.nextIndex];
+    // Real-time listener so all visitors see changes almost instantly
+    onSnapshot(stateDocRef, (snapshot) => {
+      if (snapshot.exists()) {
+        const data = snapshot.data();
+        render(data);
+        toggleButton.disabled = false;
+        statusText.textContent = "Live: changes sync for everyone.";
+      } else {
+        // Document missing; will be created by ensureInitialState
+        currentNameEl.textContent = "Setting up…";
+        toggleButton.disabled = true;
+      }
+    }, (error) => {
+      console.error("Error listening to Firestore:", error);
+      statusText.textContent = "Error connecting to server.";
+    });
 
-      // Record who just got this lead
-      state.history.unshift({
-        assignedTo,
-        time: formatTime(now)
-      });
+    // Make sure the doc exists at least once
+    ensureInitialState().catch(err => {
+      console.error("Error ensuring initial state:", err);
+      statusText.textContent = "Error setting up state.";
+    });
 
-      // Keep only last 20 entries
-      state.history = state.history.slice(0, 20);
+    // Button handler: assign current lead + flip to next person
+    toggleButton.addEventListener("click", async () => {
+      toggleButton.disabled = true;
+      statusText.textContent = "Updating…";
 
-      // Switch to the other person for the next lead
-      state.nextIndex = (state.nextIndex + 1) % people.length;
+      try {
+        await runTransaction(db, async (transaction) => {
+          const snap = await transaction.get(stateDocRef);
+          let data;
+          if (!snap.exists()) {
+            data = { nextIndex: 0, history: [] };
+          } else {
+            data = snap.data();
+          }
 
-      saveState(state);
-      render(state);
+          const assignedTo = people[data.nextIndex];
+          const nowStr = formatTime(new Date());
+
+          const existingHistory = data.history || [];
+
+          const newHistory = [
+            { assignedTo, time: nowStr },
+            ...existingHistory
+          ].slice(0, MAX_HISTORY_STORED); // 🔹 keep more in DB, we'll only show 15
+
+          const newNextIndex = (data.nextIndex + 1) % people.length;
+
+          transaction.set(stateDocRef, {
+            nextIndex: newNextIndex,
+            history: newHistory
+          });
+        });
+
+        statusText.textContent = "Updated!";
+      } catch (err) {
+        console.error("Transaction failed: ", err);
+        statusText.textContent = "Update failed, please try again.";
+      } finally {
+        toggleButton.disabled = false;
+      }
     });
   </script>
 </body>
