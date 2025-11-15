@@ -96,22 +96,15 @@
       setDoc
     } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
-    // TODO: paste your firebaseConfig here, e.g.:
-    // const firebaseConfig = {
-    //   apiKey: "YOUR_API_KEY",
-    //   authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
-    //   projectId: "YOUR_PROJECT_ID",
-    //   storageBucket: "YOUR_PROJECT_ID.appspot.com",
-    //   messagingSenderId: "1234567890",
-    //   appId: "1:1234567890:web:abcdefg12345"
-    // };
+    // Your web app's Firebase configuration
     const firebaseConfig = {
-      // ...your config from Firebase console...
+      apiKey: "AIzaSyAwZcpkH33b828fduDfrUNIKk0pXeZOskA",
+      authDomain: "bici-lead-indicator.firebaseapp.com",
+      projectId: "bici-lead-indicator",
+      storageBucket: "bici-lead-indicator.firebasestorage.app",
+      messagingSenderId: "226296375616",
+      appId: "1:226296375616:web:eda7276e4e095b908df2a5"
     };
-
-    // 🔑 This must match the string in your Firestore rules
-    const WRITE_SECRET = "SUPER_SECRET_LEAD_KEY_2025";
-
     // Initialize Firebase
     const app = initializeApp(firebaseConfig);
     const db = getFirestore(app);
@@ -152,6 +145,7 @@
       }
 
       historyEl.innerHTML = "";
+      // 🔹 Only show the most recent 15 entries
       history.slice(0, MAX_HISTORY_DISPLAYED).forEach(entry => {
         const div = document.createElement("div");
         div.className = "history-entry";
@@ -166,8 +160,7 @@
         // Default: Sean gets first lead, empty history
         await setDoc(stateDocRef, {
           nextIndex: 0,
-          history: [],
-          secret: WRITE_SECRET
+          history: []
         });
       }
     }
@@ -176,14 +169,11 @@
     onSnapshot(stateDocRef, (snapshot) => {
       if (snapshot.exists()) {
         const data = snapshot.data();
-        // Ignore the secret if present
-        render({
-          nextIndex: data.nextIndex ?? 0,
-          history: data.history ?? []
-        });
+        render(data);
         toggleButton.disabled = false;
         statusText.textContent = "Live: changes sync for everyone.";
       } else {
+        // Document missing; will be created by ensureInitialState
         currentNameEl.textContent = "Setting up…";
         toggleButton.disabled = true;
       }
@@ -213,7 +203,7 @@
             data = snap.data();
           }
 
-          const assignedTo = people[data.nextIndex ?? 0];
+          const assignedTo = people[data.nextIndex];
           const nowStr = formatTime(new Date());
 
           const existingHistory = data.history || [];
@@ -221,14 +211,13 @@
           const newHistory = [
             { assignedTo, time: nowStr },
             ...existingHistory
-          ].slice(0, MAX_HISTORY_STORED);
+          ].slice(0, MAX_HISTORY_STORED); // 🔹 keep more in DB, we'll only show 15
 
-          const newNextIndex = ((data.nextIndex ?? 0) + 1) % people.length;
+          const newNextIndex = (data.nextIndex + 1) % people.length;
 
           transaction.set(stateDocRef, {
             nextIndex: newNextIndex,
-            history: newHistory,
-            secret: WRITE_SECRET
+            history: newHistory
           });
         });
 
