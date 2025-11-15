@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Lead Rotation Tracker</title>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      margin: 0;
+      padding: 16px;
+    }
+    .card {
+      border-radius: 16px;
+      padding: 24px 32px;
+      box-shadow: 0 8px 20px rgba(0,0,0,0.08);
+      max-width: 360px;
+      text-align: center;
+    }
+    h1 {
+      font-size: 1.4rem;
+      margin-bottom: 8px;
+    }
+    .name {
+      font-size: 2rem;
+      font-weight: 700;
+      margin: 16px 0 8px;
+    }
+    .label {
+      font-size: 0.9rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      opacity: 0.7;
+    }
+    button {
+      margin-top: 16px;
+      padding: 10px 18px;
+      border-radius: 999px;
+      border: none;
+      cursor: pointer;
+      font-size: 0.95rem;
+    }
+    button:active {
+      transform: scale(0.98);
+    }
+    .history {
+      margin-top: 24px;
+      font-size: 0.85rem;
+      max-height: 200px;
+      overflow-y: auto;
+      text-align: left;
+    }
+    .history-entry {
+      margin-bottom: 4px;
+      opacity: 0.8;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Next Lead Goes To</h1>
+    <div class="name" id="currentName"></div>
+    <div class="label" id="lastUpdated"></div>
+    <button id="toggleButton">Assign Lead & Switch</button>
+
+    <div class="history" id="history"></div>
+  </div>
+
+  <script>
+    // Edit these two names to match you and your colleague
+    const people = ["Emma", "Colleague"];
+    const STORAGE_KEY = "leadRotationState_v1";
+
+    function loadState() {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        try {
+          return JSON.parse(saved);
+        } catch (e) {
+          // ignore and reset
+        }
+      }
+      return {
+        nextIndex: 0,
+        history: []
+      };
+    }
+
+    function saveState(state) {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    }
+
+    function formatTime(date) {
+      return date.toLocaleString([], {
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit"
+      });
+    }
+
+    function render(state) {
+      const currentNameEl = document.getElementById("currentName");
+      const lastUpdatedEl = document.getElementById("lastUpdated");
+      const historyEl = document.getElementById("history");
+
+      currentNameEl.textContent = people[state.nextIndex];
+
+      if (state.history.length > 0) {
+        const last = state.history[0];
+        lastUpdatedEl.textContent = `Last lead: ${last.assignedTo} at ${last.time}`;
+      } else {
+        lastUpdatedEl.textContent = "No leads assigned yet.";
+      }
+
+      historyEl.innerHTML = "";
+      state.history.forEach(entry => {
+        const div = document.createElement("div");
+        div.className = "history-entry";
+        div.textContent = `• ${entry.time} → ${entry.assignedTo}`;
+        historyEl.appendChild(div);
+      });
+    }
+
+    const state = loadState();
+    render(state);
+
+    document.getElementById("toggleButton").addEventListener("click", () => {
+      const now = new Date();
+      const assignedTo = people[state.nextIndex];
+
+      // add to top of history
+      state.history.unshift({
+        assignedTo,
+        time: formatTime(now)
+      });
+
+      // keep only last 20 entries
+      state.history = state.history.slice(0, 20);
+
+      // switch to the other person
+      state.nextIndex = (state.nextIndex + 1) % people.length;
+
+      saveState(state);
+      render(state);
+    });
+  </script>
+</body>
+</html>
