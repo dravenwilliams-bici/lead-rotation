@@ -43,7 +43,7 @@
       margin-bottom: 4px;
     }
     button {
-      margin-top: 16px;
+      margin-top: 8px;
       padding: 10px 18px;
       border-radius: 999px;
       border: none;
@@ -69,9 +69,54 @@
       font-size: 0.8rem;
       opacity: 0.7;
     }
+    .auth {
+      margin-bottom: 16px;
+      width: 100%;
+      max-width: 380px;
+    }
+    .auth input {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 8px 10px;
+      margin: 4px 0;
+      border-radius: 6px;
+      border: 1px solid #ccc;
+      font-size: 0.9rem;
+    }
+    .auth-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      margin-top: 8px;
+    }
+    .auth-status {
+      font-size: 0.8rem;
+      opacity: 0.8;
+      margin-top: 4px;
+    }
   </style>
 </head>
 <body>
+  <!-- Simple email/password sign-in -->
+  <div class="auth">
+    <div id="authSignedOut">
+      <div><strong>Sign in to use the lead indicator</strong></div>
+      <input id="emailInput" type="email" placeholder="Email" autocomplete="username" />
+      <input id="passwordInput" type="password" placeholder="Password" autocomplete="current-password" />
+      <div class="auth-row">
+        <button id="signInButton">Sign In</button>
+      </div>
+      <div class="auth-status" id="authStatusText"></div>
+    </div>
+
+    <div id="authSignedIn" style="display:none;">
+      <div class="auth-status">
+        Signed in as <span id="signedInEmail"></span>
+      </div>
+      <button id="signOutButton">Sign Out</button>
+    </div>
+  </div>
+
   <div class="card">
     <h1>Phone Lead Indicator</h1>
     <div class="subtitle">Next phone lead goes to:</div>
@@ -95,6 +140,12 @@
       runTransaction,
       setDoc
     } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+    import {
+      getAuth,
+      onAuthStateChanged,
+      signInWithEmailAndPassword,
+      signOut
+    } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 
     // Your web app's Firebase configuration
     const firebaseConfig = {
@@ -103,21 +154,33 @@
       projectId: "bici-lead-indicator",
       storageBucket: "bici-lead-indicator.firebasestorage.app",
       messagingSenderId: "226296375616",
-      appId: "1:226296375616:web:eda7276e4e095b908df2a5"
+      appId: "1:226296375616:web:17afb9c551a535478df2a5"
     };
+    
     // Initialize Firebase
     const app = initializeApp(firebaseConfig);
     const db = getFirestore(app);
+    const auth = getAuth(app);
 
     // Rotation between Sean and Draven (Sean starts)
     const people = ["Sean", "Draven"];
     const stateDocRef = doc(db, "leadState", "phoneLead");
 
+    // DOM elements
     const currentNameEl = document.getElementById("currentName");
     const lastUpdatedEl = document.getElementById("lastUpdated");
     const historyEl = document.getElementById("history");
     const toggleButton = document.getElementById("toggleButton");
     const statusText = document.getElementById("statusText");
+
+    const emailInput = document.getElementById("emailInput");
+    const passwordInput = document.getElementById("passwordInput");
+    const signInButton = document.getElementById("signInButton");
+    const signOutButton = document.getElementById("signOutButton");
+    const authStatusText = document.getElementById("authStatusText");
+    const authSignedOut = document.getElementById("authSignedOut");
+    const authSignedIn = document.getElementById("authSignedIn");
+    const signedInEmail = document.getElementById("signedInEmail");
 
     const MAX_HISTORY_STORED = 100;  // how many entries we keep in Firestore
     const MAX_HISTORY_DISPLAYED = 15; // how many we show on the page
@@ -145,7 +208,6 @@
       }
 
       historyEl.innerHTML = "";
-      // 🔹 Only show the most recent 15 entries
       history.slice(0, MAX_HISTORY_DISPLAYED).forEach(entry => {
         const div = document.createElement("div");
         div.className = "history-entry";
@@ -157,7 +219,6 @@
     async function ensureInitialState() {
       const snap = await getDoc(stateDocRef);
       if (!snap.exists()) {
-        // Default: Sean gets first lead, empty history
         await setDoc(stateDocRef, {
           nextIndex: 0,
           history: []
@@ -165,68 +226,123 @@
       }
     }
 
-    // Real-time listener so all visitors see changes almost instantly
-    onSnapshot(stateDocRef, (snapshot) => {
-      if (snapshot.exists()) {
-        const data = snapshot.data();
-        render(data);
-        toggleButton.disabled = false;
-        statusText.textContent = "Live: changes sync for everyone.";
-      } else {
-        // Document missing; will be created by ensureInitialState
-        currentNameEl.textContent = "Setting up…";
-        toggleButton.disabled = true;
-      }
-    }, (error) => {
-      console.error("Error listening to Firestore:", error);
-      statusText.textContent = "Error connecting to server.";
-    });
+    let firestoreInitialized = false;
 
-    // Make sure the doc exists at least once
-    ensureInitialState().catch(err => {
-      console.error("Error ensuring initial state:", err);
-      statusText.textContent = "Error setting up state.";
-    });
+    function startFirestore(user) {
+      if (firestoreInitialized) return;
+      firestoreInitialized = true;
 
-    // Button handler: assign current lead + flip to next person
-    toggleButton.addEventListener("click", async () => {
-      toggleButton.disabled = true;
-      statusText.textContent = "Updating…";
+      console.log("Firestore starting for", user.email);
+      statusText.textContent = "Connecting to Firestore…";
 
-      try {
-        await runTransaction(db, async (transaction) => {
-          const snap = await transaction.get(stateDocRef);
-          let data;
-          if (!snap.exists()) {
-            data = { nextIndex: 0, history: [] };
+      onSnapshot(
+        stateDocRef,
+        (snapshot) => {
+          if (snapshot.exists()) {
+            const data = snapshot.data();
+            render(data);
+            toggleButton.disabled = false;
+            statusText.textContent = `Live: changes sync for everyone.`;
           } else {
-            data = snap.data();
+            currentNameEl.textContent = "Setting up…";
+            toggleButton.disabled = true;
           }
+        },
+        (error) => {
+          console.error("Error listening to Firestore:", error);
+          statusText.textContent = "Error connecting to server.";
+        }
+      );
 
-          const assignedTo = people[data.nextIndex];
-          const nowStr = formatTime(new Date());
+      ensureInitialState().catch(err => {
+        console.error("Error ensuring initial state:", err);
+        statusText.textContent = "Error setting up state.";
+      });
 
-          const existingHistory = data.history || [];
+      toggleButton.addEventListener("click", async () => {
+        toggleButton.disabled = true;
+        statusText.textContent = "Updating…";
 
-          const newHistory = [
-            { assignedTo, time: nowStr },
-            ...existingHistory
-          ].slice(0, MAX_HISTORY_STORED); // 🔹 keep more in DB, we'll only show 15
+        try {
+          await runTransaction(db, async (transaction) => {
+            const snap = await transaction.get(stateDocRef);
+            let data;
+            if (!snap.exists()) {
+              data = { nextIndex: 0, history: [] };
+            } else {
+              data = snap.data();
+            }
 
-          const newNextIndex = (data.nextIndex + 1) % people.length;
+            const assignedTo = people[data.nextIndex];
+            const nowStr = formatTime(new Date());
+            const existingHistory = data.history || [];
 
-          transaction.set(stateDocRef, {
-            nextIndex: newNextIndex,
-            history: newHistory
+            const newHistory = [
+              { assignedTo, time: nowStr },
+              ...existingHistory
+            ].slice(0, MAX_HISTORY_STORED);
+
+            const newNextIndex = (data.nextIndex + 1) % people.length;
+
+            transaction.set(stateDocRef, {
+              nextIndex: newNextIndex,
+              history: newHistory
+            });
           });
-        });
 
-        statusText.textContent = "Updated!";
+          statusText.textContent = "Updated!";
+        } catch (err) {
+          console.error("Transaction failed: ", err);
+          statusText.textContent = "Update failed, please try again.";
+        } finally {
+          toggleButton.disabled = false;
+        }
+      });
+    }
+
+    // Handle sign-in form submit
+    signInButton.addEventListener("click", async () => {
+      const email = emailInput.value.trim();
+      const password = passwordInput.value;
+
+      if (!email || !password) {
+        authStatusText.textContent = "Please enter email and password.";
+        return;
+      }
+
+      authStatusText.textContent = "Signing in…";
+      try {
+        await signInWithEmailAndPassword(auth, email, password);
+        // onAuthStateChanged will handle the rest
       } catch (err) {
-        console.error("Transaction failed: ", err);
-        statusText.textContent = "Update failed, please try again.";
-      } finally {
-        toggleButton.disabled = false;
+        console.error("Sign-in error:", err);
+        let msg = "Sign-in failed.";
+        if (err.code === "auth/wrong-password") msg = "Wrong password.";
+        else if (err.code === "auth/user-not-found") msg = "User not found.";
+        else if (err.code === "auth/invalid-email") msg = "Invalid email.";
+        authStatusText.textContent = msg;
+      }
+    });
+
+    // Handle sign-out
+    signOutButton.addEventListener("click", async () => {
+      await signOut(auth);
+    });
+
+    // React to auth state changes
+    onAuthStateChanged(auth, (user) => {
+      if (user) {
+        authSignedOut.style.display = "none";
+        authSignedIn.style.display = "block";
+        signedInEmail.textContent = user.email || "(no email)";
+        authStatusText.textContent = "";
+        startFirestore(user);
+      } else {
+        authSignedOut.style.display = "block";
+        authSignedIn.style.display = "none";
+        signedInEmail.textContent = "";
+        statusText.textContent = "Sign in to use the lead indicator.";
+        toggleButton.disabled = true;
       }
     });
   </script>
